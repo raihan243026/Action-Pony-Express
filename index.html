@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Action Pony Express</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom font import for a game feel */
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+        :root {
+            --desert-sand: #fef3c7;
+            --sky-blue: #7dd3fc;
+            --pony-brown: #a55c3c;
+            --cactus-green: #10b981;
+            --rock-grey: #6b7280;
+            --accent-red: #ef4444;
+            --text-color: #333;
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f3f4f6;
+            font-family: 'Press Start 2P', cursive;
+            padding: 16px;
+        }
+
+        .game-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            aspect-ratio: 4 / 3; /* Keep aspect ratio fixed */
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+            border-radius: 12px;
+            overflow: hidden;
+            background: linear-gradient(to bottom, var(--sky-blue) 40%, var(--desert-sand) 40%);
+        }
+
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            touch-action: none; /* Prevents mobile scrolling when interacting with canvas */
+        }
+
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(0, 0, 0, 0.75);
+            color: white;
+            text-align: center;
+            padding: 20px;
+            z-index: 10;
+        }
+
+        .overlay h1 {
+            font-size: clamp(1.2rem, 4vw, 2.5rem);
+            margin-bottom: 20px;
+            color: var(--desert-sand);
+            text-shadow: 4px 4px 0 var(--accent-red);
+        }
+
+        .overlay p {
+            font-size: clamp(0.6rem, 2vw, 1rem);
+            margin-top: 10px;
+            color: #fff;
+        }
+
+        .start-button {
+            padding: 12px 24px;
+            font-size: clamp(0.7rem, 3vw, 1.2rem);
+            margin-top: 30px;
+            background-color: var(--accent-red);
+            color: white;
+            border: 4px solid white;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 4px 0 rgba(0, 0, 0, 0.5);
+            transition: transform 0.1s, background-color 0.1s;
+        }
+
+        .start-button:hover {
+            background-color: #dc2626;
+        }
+
+        .start-button:active {
+            transform: translateY(4px);
+            box-shadow: 0 0px 0 rgba(0, 0, 0, 0.5);
+        }
+
+        /* Responsive instructions for mobile */
+        .instructions-mobile {
+            display: block;
+        }
+        .instructions-desktop {
+            display: none;
+        }
+
+        @media (min-width: 640px) {
+            .instructions-mobile {
+                display: none;
+            }
+            .instructions-desktop {
+                display: block;
+            }
+        }
+
+        /* Game Over specific styles */
+        .game-over-score {
+            font-size: clamp(0.8rem, 3vw, 1.5rem);
+            margin: 15px 0;
+            color: white;
+        }
+        .game-over-title {
+            color: var(--accent-red);
+            text-shadow: 3px 3px 0 var(--desert-sand);
+        }
+
+        .mail-icon {
+            display: inline-block;
+            margin-right: 8px;
+            color: var(--desert-sand);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container" class="game-container">
+        <canvas id="gameCanvas"></canvas>
+
+        <!-- Start Screen / Game Over Overlay -->
+        <div id="gameOverlay" class="overlay">
+            <h1 id="overlayTitle">
+                <span class="mail-icon">✉️</span> PONY EXPRESS
+            </h1>
+            <div id="overlayContent">
+                <p class="instructions-desktop">
+                    Press **SPACE** or **UP ARROW** to Jump.<br>
+                    Avoid Cacti and Rocks! Collect Mail for Bonus Points.
+                </p>
+                <p class="instructions-mobile">
+                    **TAP** anywhere to Jump and Start!
+                </p>
+            </div>
+            <button id="startButton" class="start-button">START DELIVERY</button>
+        </div>
+    </div>
+
+    <script>
+        // IIFE to contain game logic and prevent global pollution
+        (function() {
+            const canvas = document.getElementById('gameCanvas');
+            const ctx = canvas.getContext('2d');
+            const overlay = document.getElementById('gameOverlay');
+            const overlayTitle = document.getElementById('overlayTitle');
+            const overlayContent = document.getElementById('overlayContent');
+            const startButton = document.getElementById('startButton');
+            const gameContainer = document.getElementById('game-container');
+
+            // --- Game Configuration ---
+            const GRAVITY = 0.8;
+            const JUMP_VELOCITY = -18;
+            const BASE_SPEED = 6;
+            const SPEED_INCREASE_RATE = 0.005;
+
+            // --- Game State Variables ---
+            let gameSpeed = BASE_SPEED;
+            let score = 0;
+            let hiScore = 0;
+            let frameCount = 0;
+            let animationFrameId;
+            let obstacles = [];
+            let mailBags = [];
+            let gameState = 'start'; // 'start', 'playing', 'over'
+
+            // Set initial hi-score from local storage if available
+            if (localStorage.getItem('ponyExpressHiScore')) {
+                hiScore = parseInt(localStorage.getItem('ponyExpressHiScore'));
+            }
+
+            // --- Player Object (Pony Rider) ---
+            const player = {
+                width: 50,
+                height: 50,
+                x: 80,
+                y: 0, // Will be calculated based on ground
+                yVelocity: 0,
+                isJumping: false,
+                color: 'var(--pony-brown)'
+            };
+
+            // --- Dynamic Ground Position ---
+            let groundY;
+
+            // --- Utility Functions ---
+
+            // Function to handle canvas resizing and maintain aspect ratio
+            function resizeCanvas() {
+                // Ensure canvas size is based on container
+                canvas.width = gameContainer.clientWidth;
+                canvas.height = gameContainer.clientHeight;
+                
+                // Calculate ground position based on 40% of the canvas height
+                groundY = canvas.height * 0.60;
+                player.y = groundY - player.height;
+
+                if (gameState === 'playing') {
+                    drawGame();
+                } else if (gameState === 'start' || gameState === 'over') {
+                    // Force a redraw of the background if not playing
+                    ctx.fillStyle = 'var(--sky-blue)';
+                    ctx.fillRect(0, 0, canvas.width, groundY);
+                    ctx.fillStyle = 'var(--desert-sand)';
+                    ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
+                }
+            }
+
+            // Simple collision detection (AABB)
+            function checkCollision(objA, objB) {
+                return objA.x < objB.x + objB.width &&
+                       objA.x + objA.width > objB.x &&
+                       objA.y < objB.y + objB.height &&
+                       objA.y + objA.height > objB.y;
+            }
+
+            // Draw text with a retro shadow effect
+            function drawText(text, x, y, size, color) {
+                ctx.font = size + 'px "Press Start 2P"';
+                
+                // Shadow
+                ctx.fillStyle = '#1f2937'; 
+                ctx.fillText(text, x + 3, y + 3); 
+
+                // Main Text
+                ctx.fillStyle = color;
+                ctx.fillText(text, x, y);
+            }
+
+            // --- Game Object Drawing ---
+
+            function drawPlayer() {
+                // Draw Pony (simple block)
+                ctx.fillStyle = player.color;
+                ctx.fillRect(player.x + 10, player.y + 10, player.width - 10, player.height - 10);
+                
+                // Draw Rider (hat/head)
+                ctx.fillStyle = 'var(--accent-red)';
+                ctx.fillRect(player.x + player.width - 20, player.y - 15, 15, 15); 
+            }
+
+            function drawGround() {
+                ctx.fillStyle = 'var(--desert-sand)';
+                ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
+                
+                // Draw a simple ground line for definition
+                ctx.strokeStyle = '#d97706';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(0, groundY);
+                ctx.lineTo(canvas.width, groundY);
+                ctx.stroke();
+            }
+
+            function drawObstacle(obstacle) {
+                ctx.fillStyle = obstacle.color;
+                ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+
+                // Add a simple detail for visual variety (e.g., cactus spikes or rock shadows)
+                if (obstacle.type === 'cactus') {
+                    ctx.fillStyle = '#065f46';
+                    ctx.fillRect(obstacle.x + 5, obstacle.y, 5, obstacle.height / 2);
+                    ctx.fillRect(obstacle.x + obstacle.width - 10, obstacle.y + 10, 5, obstacle.height / 2);
+                }
+            }
+
+            function drawMailBag(mailBag) {
+                // Draw the bag (a small yellow rectangle)
+                ctx.fillStyle = '#facc15';
+                ctx.fillRect(mailBag.x, mailBag.y, mailBag.width, mailBag.height);
+                
+                // Draw a simple ribbon tie
+                ctx.fillStyle = '#dc2626';
+                ctx.fillRect(mailBag.x, mailBag.y, mailBag.width, 5);
+            }
+
+            function drawScore() {
+                // Current Score (Top Left)
+                drawText('SCORE: ' + score, 20, 35, 16, 'var(--text-color)');
+                
+                // High Score (Top Right)
+                drawText('HI: ' + hiScore, canvas.width - 200, 35, 16, '#9ca3af');
+            }
+
+            // --- Game Logic ---
+
+            function jump() {
+                if (!player.isJumping) {
+                    player.isJumping = true;
+                    player.yVelocity = JUMP_VELOCITY;
+                }
+            }
+
+            function updatePlayer() {
+                // Apply gravity
+                player.yVelocity += GRAVITY;
+                player.y += player.yVelocity;
+
+                // Check for ground collision
+                if (player.y + player.height > groundY) {
+                    player.y = groundY - player.height;
+                    player.yVelocity = 0;
+                    player.isJumping = false;
+                }
+            }
+
+            function updateObstacles() {
+                // Move obstacles and check for removal
+                obstacles = obstacles.filter(obstacle => {
+                    obstacle.x -= gameSpeed;
+                    return obstacle.x + obstacle.width > 0;
+                });
+            }
+
+            function updateMailBags() {
+                // Move mail bags and check for removal
+                mailBags = mailBags.filter(mailBag => {
+                    mailBag.x -= gameSpeed;
+                    return mailBag.x + mailBag.width > 0;
+                });
+            }
+
+            function generateObstacles() {
+                // Controls the frequency of obstacle generation
+                if (frameCount % Math.floor(200 / (gameSpeed * 0.5)) === 0) {
+                    const obstacleType = Math.random() < 0.7 ? 'cactus' : 'rock';
+                    const obsWidth = obstacleType === 'cactus' ? 20 : 30;
+                    const obsHeight = obstacleType === 'cactus' ? 40 : 25;
+
+                    obstacles.push({
+                        x: canvas.width,
+                        y: groundY - obsHeight,
+                        width: obsWidth,
+                        height: obsHeight,
+                        color: obstacleType === 'cactus' ? 'var(--cactus-green)' : 'var(--rock-grey)',
+                        type: obstacleType
+                    });
+                }
+            }
+            
+            function generateMailBags() {
+                // Randomly generate mail bags less frequently than obstacles
+                if (frameCount % Math.floor(450 / (gameSpeed * 0.5)) === 0 && Math.random() < 0.6) {
+                    const mailWidth = 25;
+                    const mailHeight = 20;
+                    // Place the mail bag slightly above ground level
+                    const yPos = groundY - 40 - Math.random() * 30; 
+                    
+                    mailBags.push({
+                        x: canvas.width,
+                        y: yPos,
+                        width: mailWidth,
+                        height: mailHeight,
+                        scoreValue: 50 // Bonus points
+                    });
+                }
+            }
+
+            function checkCollisionsAndCollectibles() {
+                // Check for obstacle collision
+                for (const obstacle of obstacles) {
+                    if (checkCollision(player, obstacle)) {
+                        gameOver();
+                        return true;
+                    }
+                }
+
+                // Check for collectible (mail bag) collection
+                let collectedCount = 0;
+                mailBags = mailBags.filter(mailBag => {
+                    if (checkCollision(player, mailBag)) {
+                        score += mailBag.scoreValue;
+                        collectedCount++;
+                        return false; // Remove collected mail bag
+                    }
+                    return true; // Keep uncollected mail bag
+                });
+                
+                if (collectedCount > 0) {
+                    // Add a visual/audio feedback if necessary (e.g., flash score)
+                }
+                return false;
+            }
+
+            function updateGame() {
+                if (gameState !== 'playing') return;
+
+                frameCount++;
+                
+                // Increase game speed over time
+                gameSpeed += SPEED_INCREASE_RATE;
+                
+                // Update score every 10 frames
+                if (frameCount % 10 === 0) {
+                    score += 1;
+                }
+
+                updatePlayer();
+                updateObstacles();
+                updateMailBags();
+                generateObstacles();
+                generateMailBags();
+
+                if (checkCollisionsAndCollectibles()) {
+                    return; // Game over handled
+                }
+            }
+
+            function drawGame() {
+                // 1. Clear Canvas (Draw Sky)
+                ctx.fillStyle = 'var(--sky-blue)';
+                ctx.fillRect(0, 0, canvas.width, groundY);
+
+                // 2. Draw Ground
+                drawGround();
+                
+                // 3. Draw Obstacles
+                obstacles.forEach(drawObstacle);
+
+                // 4. Draw Collectibles
+                mailBags.forEach(drawMailBag);
+
+                // 5. Draw Player
+                drawPlayer();
+
+                // 6. Draw Score
+                drawScore();
+            }
+
+            // --- Game States ---
+
+            function startGame() {
+                if (gameState === 'playing') return;
+
+                gameState = 'playing';
+                overlay.style.display = 'none';
+
+                // Reset game variables
+                score = 0;
+                gameSpeed = BASE_SPEED;
+                frameCount = 0;
+                obstacles = [];
+                mailBags = [];
+                
+                // Reset player position
+                player.y = groundY - player.height;
+                player.yVelocity = 0;
+                player.isJumping = false;
+
+                // Start the loop
+                gameLoop();
+            }
+
+            function gameOver() {
+                gameState = 'over';
+                
+                // Stop animation
+                cancelAnimationFrame(animationFrameId);
+
+                // Update high score
+                if (score > hiScore) {
+                    hiScore = score;
+                    localStorage.setItem('ponyExpressHiScore', hiScore);
+                }
+
+                // Show overlay
+                overlayTitle.innerHTML = `<span class="game-over-title">DELIVERY FAILED!</span>`;
+                overlayContent.innerHTML = `
+                    <p class="game-over-score">Your Score: ${score}</p>
+                    <p class="game-over-score">High Score: ${hiScore}</p>
+                    <p>Hit an obstacle and lost the mail!</p>
+                `;
+                startButton.textContent = 'RESTART';
+                overlay.style.display = 'flex';
+            }
+            
+            // --- Main Game Loop ---
+            function gameLoop() {
+                updateGame();
+                drawGame();
+                animationFrameId = requestAnimationFrame(gameLoop);
+            }
+
+            // --- Event Listeners and Initialization ---
+
+            function handleInteraction() {
+                if (gameState === 'start' || gameState === 'over') {
+                    startGame();
+                } else if (gameState === 'playing') {
+                    jump();
+                }
+            }
+
+            // Keyboard controls (Space or Up Arrow to jump)
+            document.addEventListener('keydown', (e) => {
+                if (e.code === 'Space' || e.code === 'ArrowUp') {
+                    e.preventDefault(); // Prevent scrolling
+                    handleInteraction();
+                }
+            });
+
+            // Button click to start/restart
+            startButton.addEventListener('click', () => {
+                startGame();
+            });
+
+            // Mouse click/Touch tap controls for mobile
+            canvas.addEventListener('click', (e) => {
+                e.preventDefault();
+                handleInteraction();
+            });
+
+            // Initial setup on window load and resize listener
+            window.addEventListener('resize', resizeCanvas);
+            
+            // Initial call to set size and ground position
+            resizeCanvas(); 
+            
+            // Display hi-score on start screen initially
+            document.getElementById('overlayContent').innerHTML += `
+                <p class="mt-4">Highest Delivery Score: ${hiScore}</p>
+            `;
+
+        })();
+    </script>
+
+</body>
+</html>

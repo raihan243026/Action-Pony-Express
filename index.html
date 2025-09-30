@@ -231,7 +231,7 @@
                 return objA.x < objB.x + objB.width &&
                        objA.x + objA.width > objB.x &&
                        objA.y < objB.y + objB.height &&
-                       objA.y + objA.height > objB.y;
+                       objA.y + objB.height > objB.y;
             }
 
             // Draw text with a retro shadow effect
@@ -240,7 +240,7 @@
                 
                 // Shadow
                 ctx.fillStyle = '#1f2937'; 
-                ctx.fillText(text, x + 3, y + 3); 
+                ctx.fillText(text, x + 2, y + 2); // Reduced shadow offset for better scaling
 
                 // Main Text
                 ctx.fillStyle = color;
@@ -295,11 +295,23 @@
             }
 
             function drawScore() {
+                // Calculate responsive font size and positions
+                const baseFontSize = Math.floor(canvas.height / 25);
+                const fontSize = Math.max(12, baseFontSize); // Min font size of 12px
+                const marginX = Math.max(10, canvas.width * 0.025); // 2.5% horizontal margin
+                const marginY = Math.max(30, canvas.height * 0.07); // 7% vertical margin
+
                 // Current Score (Top Left)
-                drawText('SCORE: ' + score, 20, 35, 16, 'var(--text-color)');
+                drawText('SCORE: ' + score, marginX, marginY, fontSize, 'var(--text-color)');
                 
                 // High Score (Top Right)
-                drawText('HI: ' + hiScore, canvas.width - 200, 35, 16, '#9ca3af');
+                const hiScoreText = 'HI: ' + hiScore;
+                
+                // Temporarily set font to measure text width
+                ctx.font = fontSize + 'px "Press Start 2P"'; 
+                const hiScoreWidth = ctx.measureText(hiScoreText).width;
+                
+                drawText(hiScoreText, canvas.width - marginX - hiScoreWidth, marginY, fontSize, '#9ca3af');
             }
 
             // --- Game Logic ---
@@ -379,7 +391,15 @@
             function checkCollisionsAndCollectibles() {
                 // Check for obstacle collision
                 for (const obstacle of obstacles) {
-                    if (checkCollision(player, obstacle)) {
+                    // Small adjustment to collision box to be more forgiving on the top and sides
+                    const paddedPlayer = {
+                        x: player.x + 5,
+                        y: player.y + 5,
+                        width: player.width - 10,
+                        height: player.height - 10
+                    };
+
+                    if (checkCollision(paddedPlayer, obstacle)) {
                         gameOver();
                         return true;
                     }
@@ -397,7 +417,7 @@
                 });
                 
                 if (collectedCount > 0) {
-                    // Add a visual/audio feedback if necessary (e.g., flash score)
+                    // Placeholder for future visual/audio feedback
                 }
                 return false;
             }
